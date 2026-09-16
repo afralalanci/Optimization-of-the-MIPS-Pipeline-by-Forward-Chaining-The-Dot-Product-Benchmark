@@ -1,0 +1,2 @@
+# Optimization-of-the-MIPS-Pipeline-by-Forward-Chaining-The-Dot-Product-Benchmark
+SystemVerilog implementation of a 5-stage MIPS pipeline executing a vector dot-product benchmark. Includes a forwarding unit that reduces data hazards without stalling execution, decreasing instruction cycles from 157 to 103 and improving performance by 54 cycles. Simulation waveforms validate the effectiveness of data bypassing.
