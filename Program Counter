@@ -1,0 +1,11 @@
+module pc_reg53 (
+    input logic clk53, rst53, en53,
+    input logic [31:0] next_pc53,
+    output logic [31:0] pc53
+);
+    // sync update
+    always_ff @(posedge clk53 or posedge rst53) begin
+        if (rst53) pc53 <= 32'h0;
+        else if (en53) pc53 <= next_pc53;
+    end
+endmodule
