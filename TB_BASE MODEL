@@ -1,0 +1,36 @@
+// TESTBENCH
+
+module tb_mips53;
+    logic clk53, rst53;
+    
+    // inst dut
+    mips_baseline53 dut (.clk53(clk53), .rst53(rst53));
+
+    // clk gen
+    always #5 clk53 = ~clk53;
+   
+  
+   initial begin
+        // dump waves
+        $dumpfile("dump.vcd");
+        $dumpvars(0, tb_mips53);
+
+        clk53 = 0; rst53 = 1;
+        #10 rst53 = 0;
+        
+        // lets loop run longer
+        #2000;
+        $display("FINAL DOT PRODUCT ($r1) = %0d", dut.rf.rf53[1]);
+        $finish;
+    end
+
+    // mon cycles
+    int cycle_cnt53 = 0;
+    always @(posedge clk53) begin
+        if (!rst53) begin
+            cycle_cnt53++;
+            $display("Cycle: %0d | PC: %h | r1: %0d | r3: %0d | r5: %0d | r7: %0d", 
+                cycle_cnt53, dut.pc_if53, dut.rf.rf53[1], dut.rf.rf53[3], dut.rf.rf53[5], dut.rf.rf53[7]);
+        end
+    end
+endmodule
