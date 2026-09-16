@@ -1,0 +1,325 @@
+// DESIGN BLOCKS
+
+//////////////////////////////////////////////////////////////////////////
+
+//Program Counter
+module pc_reg53 (
+    input logic clk53, rst53, en53,
+    input logic [31:0] next_pc53,
+    output logic [31:0] pc53
+);
+    // sync update
+    always_ff @(posedge clk53 or posedge rst53) begin
+        if (rst53) pc53 <= 32'h0;
+        else if (en53) pc53 <= next_pc53;
+    end
+endmodule
+
+//////////////////////////////////////////////////////////////////////////
+
+
+// Instruction Memory
+module imem53 (
+    input  logic [31:0] addr53,
+    output logic [31:0] instr53
+);
+    logic [31:0] mem53 [0:63];
+    // init asm
+    initial begin
+        mem53[0] = 32'h24030000;
+        mem53[1] = 32'h24050040;
+        mem53[2] = 32'h24070009;
+        mem53[3] = 32'h00000821; 
+        mem53[4] = 32'h10e00008;
+        mem53[5] = 32'h8c620000;
+        mem53[6] = 32'h8ca40000;
+        mem53[7] = 32'h70441002;
+        mem53[8] = 32'h00220821;
+        mem53[9] = 32'h24630004; // fix: addiu $r3, $r3, 4
+        mem53[10] = 32'h24a50004;
+        mem53[11] = 32'h24e7ffff;
+        mem53[12] = 32'h08000004;
+        mem53[13] = 32'h0800000d; 
+    end
+    // async rd
+    assign instr53 = mem53[addr53[31:2]];
+endmodule
+
+//////////////////////////////////////////////////////////////////////////
+
+
+// Data Memory
+module dmem53 (
+    input logic clk53, we53,
+    input logic [31:0] addr53, wd53,
+    output logic [31:0] rd53
+);
+    logic [31:0] mem53 [0:63];
+    // init vectors
+    initial begin
+        for (int i=0; i<64; i++) mem53[i] = 32'h0;
+        mem53[0] = 32'h0; mem53[1] = 32'h2; mem53[2] = 32'h0;
+        mem53[3] = 32'h0; mem53[4] = 32'h8; mem53[5] = 32'h8;
+        mem53[6] = 32'h6; mem53[7] = 32'h5; mem53[8] = 32'h3;
+        mem53[16] = 32'h3; mem53[17] = 32'h5; mem53[18] = 32'h3;
+        mem53[19] = 32'h3; mem53[20] = 32'h1; mem53[21] = 32'h1;
+        mem53[22] = 32'h9; mem53[23] = 32'h8; mem53[24] = 32'h6;
+    end
+    // async read
+    assign rd53 = mem53[addr53[31:2]];
+    // sync write
+    always_ff @(posedge clk53) begin
+        if (we53) mem53[addr53[31:2]] <= wd53;
+    end
+endmodule
+
+//////////////////////////////////////////////////////////////////////////
+
+
+// Register File
+module reg_file53 (
+    input logic clk53, we53,
+    input logic [4:0] ra1_53, ra2_53, wa53,
+    input logic [31:0] wd53,
+    output logic [31:0] rd1_53, rd2_53
+);
+    logic [31:0] rf53 [0:31];
+
+    // debug wires for vcd
+    logic [31:0] r1_53, r3_53, r5_53, r7_53;
+    assign r1_53 = rf53[1];
+    assign r3_53 = rf53[3];
+    assign r5_53 = rf53[5];
+    assign r7_53 = rf53[7];
+
+    // r0 rules
+    assign rd1_53 = (ra1_53 == 0) ? 0 : rf53[ra1_53];
+    assign rd2_53 = (ra2_53 == 0) ? 0 : rf53[ra2_53];
+    
+    // negedge write
+    always_ff @(negedge clk53) begin
+        if (we53 && wa53 != 0) rf53[wa53] <= wd53;
+    end
+endmodule
+
+//////////////////////////////////////////////////////////////////////////
+
+
+// strict stall unit
+module hazard_unit_strict53 (
+    input logic [4:0] rs_id53, rt_id53,
+    input logic [4:0] wa_ex53, wa_mem53, wa_wb53,
+    input logic reg_write_ex53, reg_write_mem53, reg_write_wb53,
+    output logic stall53
+);
+    // detect hazards
+    always_comb begin
+        stall53 = 1'b0;
+        if (reg_write_ex53 && wa_ex53 != 0 && (wa_ex53 == rs_id53 || wa_ex53 == rt_id53)) stall53 = 1'b1;
+        if (reg_write_mem53 && wa_mem53 != 0 && (wa_mem53 == rs_id53 || wa_mem53 == rt_id53)) stall53 = 1'b1;
+        if (reg_write_wb53 && wa_wb53 != 0 && (wa_wb53 == rs_id53 || wa_wb53 == rt_id53)) stall53 = 1'b1;
+    end
+endmodule
+
+//////////////////////////////////////////////////////////////////////////
+
+// ALU
+module alu53 (
+    input  logic [31:0] a53, b53,
+    input logic [2:0] alu_ctrl53,
+    output logic [31:0] result53
+);
+    // calc
+    always_comb begin
+        case (alu_ctrl53)
+            3'b000: result53 = a53 + b53; 
+            3'b001: result53 = a53 * b53; 
+            default: result53 = 32'h0;
+        endcase
+    end
+endmodule
+
+
+// fwd logic
+module forwarding_unit53 (
+    input logic [4:0] rs_ex53, rt_ex53,
+    input logic [4:0] wa_mem53, wa_wb53,
+    input logic reg_write_mem53, reg_write_wb53,
+    output logic [1:0] fwd_a53, fwd_b53
+);
+    // ex mem fwd a
+    always_comb begin
+        if (reg_write_mem53 && wa_mem53 != 0 && wa_mem53 == rs_ex53) fwd_a53 = 2'b10;
+        else if (reg_write_wb53 && wa_wb53 != 0 && wa_wb53 == rs_ex53) fwd_a53 = 2'b01;
+        else fwd_a53 = 2'b00;
+    end
+    
+    // ex mem fwd b
+    always_comb begin
+        if (reg_write_mem53 && wa_mem53 != 0 && wa_mem53 == rt_ex53) fwd_b53 = 2'b10;
+        else if (reg_write_wb53 && wa_wb53 != 0 && wa_wb53 == rt_ex53) fwd_b53 = 2'b01;
+        else fwd_b53 = 2'b00;
+    end
+endmodule
+
+///////////////////////////////////////////////////////////////////////////
+
+
+// Forwarding hazard unit
+module hazard_unit_fwd53 (
+    input  logic [4:0] rs_id53, rt_id53, rt_ex53, wa_ex53, wa_mem53,
+    input  logic mem_read_ex53, reg_write_ex53, reg_write_mem53, is_branch53,
+    output logic stall53
+);
+    // check stall
+    always_comb begin
+        stall53 = 1'b0;
+        
+        // load use
+        if (mem_read_ex53 && rt_ex53 != 0 && (rt_ex53 == rs_id53 || rt_ex53 == rt_id53)) 
+            stall53 = 1'b1;
+            
+        // branch depend
+        if (is_branch53) begin
+            if (reg_write_ex53 && wa_ex53 != 0 && (wa_ex53 == rs_id53 || wa_ex53 == rt_id53)) 
+                stall53 = 1'b1;
+            if (reg_write_mem53 && wa_mem53 != 0 && (wa_mem53 == rs_id53 || wa_mem53 == rt_id53)) 
+                stall53 = 1'b1;
+        end
+    end
+endmodule
+
+///////////////////////////////////////////////////////////////////////////
+
+
+// Top Mips Module Forwarded
+module mips_forward53 (
+    input logic clk53, rst53
+);
+    // wires
+    logic [31:0] pc_if53, next_pc53, instr_if53;
+    logic stall53;
+
+    logic [31:0] instr_id53, pc_id53;
+    logic [31:0] rd1_id53, rd2_id53;
+    logic [4:0] rs_id53, rt_id53, rd_id53;
+    logic reg_dst_id53, alu_src_id53, mem_read_id53, mem_write_id53, reg_write_id53;
+    logic [2:0] alu_ctrl_id53, alu_ctrl_ex53;
+    
+    logic is_beq53, is_j53, is_jr53, do_branch53, branch_taken53, flush53;
+    logic [31:0] branch_tgt53, jump_tgt53;
+
+    logic [31:0] rd1_ex53, rd2_ex53, imm_ex53;
+    logic [4:0] rs_ex53, rt_ex53, rd_ex53, wa_ex53;
+    logic [31:0] alu_a53, alu_b53, alu_b_fwd53, alu_out_ex53;
+    logic reg_dst_ex53, alu_src_ex53, mem_read_ex53, mem_write_ex53, reg_write_ex53;
+    logic [1:0] fwd_a53, fwd_b53;
+
+    logic [31:0] alu_out_mem53, rd2_mem53, dmem_out_mem53;
+    logic [4:0] wa_mem53;
+    logic mem_read_mem53, mem_write_mem53, reg_write_mem53;
+
+    logic [31:0] alu_out_wb53, dmem_out_wb53, wb_data53;
+    logic [4:0] wa_wb53;
+    logic mem_read_wb53, reg_write_wb53;
+
+    //  IF 
+    pc_reg53 pc_reg (.clk53(clk53), .rst53(rst53), .en53(~stall53), .next_pc53(next_pc53), .pc53(pc_if53));
+    imem53 imem (.addr53(pc_if53), .instr53(instr_if53));
+
+    //  ID 
+    assign rs_id53 = instr_id53[25:21];
+    assign rt_id53 = instr_id53[20:16];
+    assign rd_id53 = instr_id53[15:11];
+
+    reg_file53 rf (.clk53(clk53), .we53(reg_write_wb53), .ra1_53(rs_id53), .ra2_53(rt_id53), .wa53(wa_wb53), .wd53(wb_data53), .rd1_53(rd1_id53), .rd2_53(rd2_id53));
+    
+    // smart hu
+    hazard_unit_fwd53 hu (.rs_id53(rs_id53), .rt_id53(rt_id53), .rt_ex53(rt_ex53), .wa_ex53(wa_ex53), .wa_mem53(wa_mem53), .mem_read_ex53(mem_read_ex53), .reg_write_ex53(reg_write_ex53), .reg_write_mem53(reg_write_mem53), .is_branch53(is_beq53), .stall53(stall53));
+
+    // decode
+    logic [5:0] op53;
+    assign op53 = instr_id53[31:26];
+    assign reg_write_id53 = (op53 == 0) | (op53 == 6'h09) | (op53 == 6'h23) | (op53 == 6'h1c);
+    assign mem_read_id53  = (op53 == 6'h23);
+    assign mem_write_id53 = (op53 == 6'h2b);
+    assign alu_src_id53   = (op53 == 6'h09) | (op53 == 6'h23);
+    assign reg_dst_id53   = (op53 == 0) | (op53 == 6'h1c);
+    assign alu_ctrl_id53  = (op53 == 6'h1c) ? 3'b001 : 3'b000;
+
+    // branch
+    assign is_beq53 = (op53 == 6'h04);
+    assign is_j53   = (op53 == 6'h02);
+    assign is_jr53  = (op53 == 6'h00) && (instr_id53[5:0] == 6'h08);
+
+    assign branch_taken53 = is_beq53 && (rd1_id53 == rd2_id53);
+    assign do_branch53 = !stall53 && (is_j53 | is_jr53 | branch_taken53);
+    assign flush53 = do_branch53;
+
+    assign branch_tgt53 = pc_id53 + 4 + ({{14{instr_id53[15]}}, instr_id53[15:0], 2'b00});
+    assign jump_tgt53   = {pc_id53[31:28], instr_id53[25:0], 2'b00};
+
+    // pc logic
+    always_comb begin
+        if (do_branch53) begin
+            if (is_jr53) next_pc53 = rd1_id53;
+            else if (is_j53) next_pc53 = jump_tgt53;
+            else next_pc53 = branch_tgt53;
+        end else begin
+            next_pc53 = pc_if53 + 4;
+        end
+    end
+
+    //  IF/ID 
+    always_ff @(posedge clk53 or posedge rst53) begin
+        if (rst53 || flush53) begin
+            instr_id53 <= 0; pc_id53 <= 0;
+        end else if (!stall53) begin
+            instr_id53 <= instr_if53; pc_id53 <= pc_if53;
+        end
+    end
+
+    //  ID/EX 
+    always_ff @(posedge clk53 or posedge rst53) begin
+        if (rst53 || stall53) begin 
+            reg_write_ex53 <= 0; mem_read_ex53 <= 0; mem_write_ex53 <= 0; wa_ex53 <= 0;
+        end else begin
+            reg_write_ex53 <= reg_write_id53; mem_read_ex53 <= mem_read_id53; mem_write_ex53 <= mem_write_id53;
+            alu_src_ex53 <= alu_src_id53; reg_dst_ex53 <= reg_dst_id53; alu_ctrl_ex53 <= alu_ctrl_id53;
+            rd1_ex53 <= rd1_id53; rd2_ex53 <= rd2_id53;
+            rs_ex53 <= rs_id53; rt_ex53 <= rt_id53; rd_ex53 <= rd_id53;
+            imm_ex53 <= {{16{instr_id53[15]}}, instr_id53[15:0]};
+            wa_ex53 <= reg_dst_id53 ? rd_id53 : rt_id53;
+        end
+    end
+
+    //  EX 
+    // fwd inst
+    forwarding_unit53 fwd (.rs_ex53(rs_ex53), .rt_ex53(rt_ex53), .wa_mem53(wa_mem53), .wa_wb53(wa_wb53), .reg_write_mem53(reg_write_mem53), .reg_write_wb53(reg_write_wb53), .fwd_a53(fwd_a53), .fwd_b53(fwd_b53));
+
+    // fwd muxes
+    assign alu_a53 = (fwd_a53 == 2'b10) ? alu_out_mem53 : (fwd_a53 == 2'b01) ? wb_data53 : rd1_ex53;
+    assign alu_b_fwd53 = (fwd_b53 == 2'b10) ? alu_out_mem53 : (fwd_b53 == 2'b01) ? wb_data53 : rd2_ex53;
+    assign alu_b53 = alu_src_ex53 ? imm_ex53 : alu_b_fwd53;
+    
+    alu53 alu (.a53(alu_a53), .b53(alu_b53), .alu_ctrl53(alu_ctrl_ex53), .result53(alu_out_ex53));
+
+    //  EX/MEM 
+    always_ff @(posedge clk53) begin
+        reg_write_mem53 <= reg_write_ex53; mem_read_mem53 <= mem_read_ex53; mem_write_mem53 <= mem_write_ex53;
+        alu_out_mem53 <= alu_out_ex53; rd2_mem53 <= alu_b_fwd53; wa_mem53 <= wa_ex53;
+    end
+
+    // MEM 
+    dmem53 dmem (.clk53(clk53), .we53(mem_write_mem53), .addr53(alu_out_mem53), .wd53(rd2_mem53), .rd53(dmem_out_mem53));
+
+    //  MEM/WB
+    always_ff @(posedge clk53) begin
+        reg_write_wb53 <= reg_write_mem53; mem_read_wb53 <= mem_read_mem53;
+        alu_out_wb53 <= alu_out_mem53; dmem_out_wb53 <= dmem_out_mem53; wa_wb53 <= wa_mem53;
+    end
+
+    //  WB 
+    assign wb_data53 = mem_read_wb53 ? dmem_out_wb53 : alu_out_wb53;
+
+endmodule
